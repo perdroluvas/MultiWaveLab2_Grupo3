@@ -6,34 +6,7 @@ This work was approved by the Ethics in Research with Humans Committee at UFSC, 
 
 ## Documentation
 
-Project documentation is available at:
-
-**https://sklautau.github.io/MultiWaveLab2**
-
-## Data availability statement for reproducibility
-
-This repository contains the data required to reproduce the reported computational experiments. **All data included has been anonymized**, and only glucose and biomedical signals are available. Personal or identifiable participant information not required for reproduction is not included.
-
-## What this repository does
-
-MultiWaveLab2 provides a configurable and reproducible framework for biomedical signal processing and machine learning experiments related to non-invasive glucose estimation.
-
-The framework supports:
-
-* organization of multiple biomedical datasets;
-* PPG, ECG, and bioimpedance processing;
-* signal-quality assessment and segmentation;
-* feature extraction and selection;
-* feature aggregation and multimodal fusion;
-* participant-wise dataset splitting;
-* regression model training and hyperparameter optimization;
-* nested grouped cross-validation;
-* comparison with baseline regressors; and
-* evaluation on participants not used during model development.
-
-Experiments are defined through configuration files so that different methodological choices can be executed, compared, and reproduced without rewriting the complete analysis workflow.
-
-The dissertation associated with this repository evaluates 15 methodological configurations across four analysis datasets, for a total of 60 experiments.
+This fork was made to explore and present the feature extraction capability of this repo and to create new features to show as columns. This is better detailed in /new_features/README.md
 
 ## Reproducing the dissertation experiments
 
