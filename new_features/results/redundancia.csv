@@ -1,0 +1,5 @@
+feature_nova,original_mais_parecida,spearman_rho
+repr_ppg_beat_rate_hz,ppg_h4_PRV_HRV_MeanNN,-0.999
+repr_ppg_b2_width_over_period,ppg_s3_E2_norm,-0.493
+repr_ppg_b2_crest_time_over_period,ppg_b2_Tr_norm_median,0.964
+repr_ppg_p1_rr_cv,ppg_h4_PRV_HRV_CVNN,1.0

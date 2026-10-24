@@ -15,9 +15,9 @@
     }
   ],
   "skipped": [],
-  "n_input_rows": 78,
+  "n_input_rows": 92,
   "n_input_features": 72,
-  "n_output_rows": 78,
+  "n_output_rows": 92,
   "n_output_features": 76,
   "new_columns": [
     "repr_ppg_beat_rate_hz",
@@ -25,7 +25,5 @@
     "repr_ppg_b2_crest_time_over_period",
     "repr_ppg_p1_rr_cv"
   ],
-  "output_file": "../../multiwavelab_outputs/output_ieb1/features/features0_train_repr.csv",
-  "output_file_test": "../../multiwavelab_outputs/output_ieb1/features/features0_test_repr.csv",
-  "n_test_rows": 6
+  "output_file": "new_features/results/features0_repr.csv"
 }

@@ -141,7 +141,7 @@ def run_fused(
         raise FileNotFoundError(
             f"Features file not found: {input_file}\n"
             "Run the feature extraction stage of the pipeline first "
-            "(python run_all_pipelines.py <json_file>)."
+            "(see section 4.1 of new_features/README.md)."
         )
     print(f"Reading original features from: {input_file}")
     df = pd.read_csv(input_file)
@@ -176,7 +176,7 @@ def run_train_test(
             raise FileNotFoundError(
                 f"Split features file not found: {path}\n"
                 "Run the train/test split stage of the pipeline first "
-                "(python run_all_pipelines.py <json_file>)."
+                "(see section 4.1 of new_features/README.md)."
             )
 
     print(f"Reading training features from: {train_file}")

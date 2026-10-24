@@ -146,11 +146,12 @@ RATIO_RULES: tuple[RatioRule, ...] = (
     ),
     RatioRule(
         name="ppg_p1_rr_cv",
-        numerator=("ppg_p1_peak_interval_std",),
-        denominator=("ppg_p1_hr_mean",),
-        multiplier=60.0,
+        numerator=("ppg_p1_peak_interval_std", "ppg_p1_hr_mean"),
+        denominator=(),
+        multiplier=1.0 / 60.0,
         description=(
-            "Coefficient of variation of the pulse-to-pulse interval: a "
+            "Coefficient of variation of the pulse-to-pulse interval: "
+            "std(RR) / mean(RR), with mean(RR) = 60 / hr_mean. A "
             "dimensionless measure of the pulse rate variability."
         ),
     ),
@@ -263,10 +264,13 @@ def _product_of_columns(
     Returns
     -------
     tuple
-        ``(product_series, missing_column_names)``. The product is all-NaN
-        when no column is available.
+        ``(product_series, missing_column_names)``. The empty product is 1,
+        and the product is all-NaN when none of the requested columns is
+        available.
     """
     scalars = scalars or {}
+    if not columns:
+        return pd.Series(1.0, index=df.index, dtype=float), []
     result: pd.Series | None = None
     missing: list[str] = []
     for col in columns:

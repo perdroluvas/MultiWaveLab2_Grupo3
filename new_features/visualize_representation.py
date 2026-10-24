@@ -45,18 +45,27 @@ FIGURE_NAMES = ("01_as_quatro_features.png", "02_mapa_correlacao.png")
 
 EXPECTED_COLUMNS = tuple(REPR_PREFIX + rule.name for rule in RATIO_RULES)
 
+TARGET_LABEL = "Glicose"
+
 FEATURE_LABELS = {
-    "repr_ppg_beat_rate_hz": "FC real",
-    "repr_ppg_b2_width_over_period": "Largura / período",
-    "repr_ppg_b2_crest_time_over_period": "Tempo até o pico / período",
-    "repr_ppg_p1_rr_cv": "CV dos intervalos (RR)",
+    "repr_ppg_beat_rate_hz": "Ritmo do coração",
+    "repr_ppg_b2_width_over_period": "Largura do pulso",
+    "repr_ppg_b2_crest_time_over_period": "Subida do pulso",
+    "repr_ppg_p1_rr_cv": "Irregularidade do ritmo",
+}
+
+FEATURE_DESCRIPTIONS = {
+    "repr_ppg_beat_rate_hz": "batimentos por segundo",
+    "repr_ppg_b2_width_over_period": "parte do batimento com a onda acima da metade da altura",
+    "repr_ppg_b2_crest_time_over_period": "parte do batimento até a onda chegar ao pico",
+    "repr_ppg_p1_rr_cv": "quanto o intervalo entre batimentos varia",
 }
 
 FEATURE_AXIS_LABELS = {
-    "repr_ppg_beat_rate_hz": "batimentos/s",
-    "repr_ppg_b2_width_over_period": "fração do ciclo",
-    "repr_ppg_b2_crest_time_over_period": "fração do ciclo",
-    "repr_ppg_p1_rr_cv": "adimensional",
+    "repr_ppg_beat_rate_hz": "batimentos por segundo (1,2 = 72 por minuto)",
+    "repr_ppg_b2_width_over_period": "fração do batimento (0 a 1)",
+    "repr_ppg_b2_crest_time_over_period": "fração do batimento (0 a 1)",
+    "repr_ppg_p1_rr_cv": "variação relativa (0 = ritmo constante)",
 }
 
 
@@ -95,8 +104,12 @@ def plot_four_features(df: pd.DataFrame, output: Path) -> None:
     if len(columns) != 4:
         raise ValueError(f"A figura espera 4 features, encontrei {len(columns)}.")
 
-    figure, axes = plt.subplots(2, 2, figsize=(11, 8.5))
+    figure, axes = plt.subplots(2, 2, figsize=(11, 9.5))
     for axis, name in zip(axes.ravel(), columns):
+        heading = (
+            f"{FEATURE_LABELS.get(name, name)}\n"
+            f"({FEATURE_DESCRIPTIONS.get(name, '')})"
+        )
         x = pd.to_numeric(df[name], errors="coerce")
         y = pd.to_numeric(df[TARGET_COLUMN], errors="coerce")
         mask = x.notna() & y.notna()
@@ -109,27 +122,28 @@ def plot_four_features(df: pd.DataFrame, output: Path) -> None:
             grid = np.linspace(x[mask].min(), x[mask].max(), 50)
             axis.plot(grid, slope * grid + intercept, color="#C44E52", linewidth=1.6)
             rho, pvalue = spearmanr(x[mask], y[mask])
-            axis.set_title(
-                f"{FEATURE_LABELS.get(name, name)}\n"
-                f"Spearman ρ = {rho:+.2f}  (p = {pvalue:.3f}) "
-                f"{_significance(pvalue)}",
-                fontsize=11,
+            stats = (
+                f"correlação com a glicose: ρ = {rho:+.2f}  (p = {pvalue:.3f}) "
+                .replace(".", ",")
+                + _significance(pvalue)
             )
+            axis.set_title(f"{heading}\n{stats}", fontsize=11)
         else:
-            axis.set_title(FEATURE_LABELS.get(name, name), fontsize=11)
+            axis.set_title(heading, fontsize=11)
         axis.set_xlabel(FEATURE_AXIS_LABELS.get(name, ""), fontsize=9)
-        axis.set_ylabel("GLC (mg/dL)", fontsize=9)
+        axis.set_ylabel("glicose (mg/dL)", fontsize=9)
         axis.tick_params(labelsize=9)
         axis.grid(alpha=0.3)
 
     figure.suptitle(
         f"As quatro features novas × glicose "
-        f"(n = {_n_participants(df)} participantes)",
+        f"({_n_participants(df)} participantes, um ponto por pessoa)",
         fontsize=13,
     )
     figure.text(
         0.5,
         0.01,
+        "ρ = correlação de Spearman (−1 a +1; 0 = sem relação)   "
         "* p < 0,05   ** p < 0,01   *** p < 0,001   n.s. = não significativo",
         ha="center",
         fontsize=8,
@@ -161,7 +175,9 @@ def plot_correlation_heatmap(df: pd.DataFrame, output: Path) -> None:
     axis.set_xticks(range(len(matrix.columns)))
     axis.set_yticks(range(len(matrix.columns)))
     labels = [
-        FEATURE_LABELS.get(c, c.replace(REPR_PREFIX, "")) for c in matrix.columns
+        TARGET_LABEL if c == TARGET_COLUMN
+        else FEATURE_LABELS.get(c, c.replace(REPR_PREFIX, ""))
+        for c in matrix.columns
     ]
     axis.set_xticklabels(labels, rotation=35, ha="right", fontsize=9)
     axis.set_yticklabels(labels, fontsize=9)
@@ -172,14 +188,18 @@ def plot_correlation_heatmap(df: pd.DataFrame, output: Path) -> None:
                 continue
             value = matrix.iat[row, col]
             axis.text(
-                col, row, f"{value:.2f}", ha="center", va="center", fontsize=9,
+                col, row, f"{value:.2f}".replace(".", ","),
+                ha="center", va="center", fontsize=9,
                 color="white" if abs(value) > 0.5 else "black",
             )
 
-    figure.colorbar(image, ax=axis, label="correlação de Spearman")
+    figure.colorbar(
+        image, ax=axis,
+        label="correlação (−1 = inversa, 0 = nenhuma, +1 = direta)",
+    )
     axis.set_title(
-        "Correlação de Spearman entre as 4 features e a GLC\n"
-        f"(n = {_n_participants(df)})",
+        "Quanto as 4 features e a glicose andam juntas\n"
+        f"(correlação de Spearman, {_n_participants(df)} participantes)",
         fontsize=11,
     )
     figure.tight_layout()
