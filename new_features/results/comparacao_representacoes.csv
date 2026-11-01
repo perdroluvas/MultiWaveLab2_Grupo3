@@ -1,0 +1,5 @@
+representacao,modelo,mae_mg_dl,rmse_mg_dl,origem
+PLS 2,SVM,42.428,66.799,avaliacao_pls_cv.csv
+PCA 4,SVM,42.73,67.501,avaliacao_pca_cv.csv
+4 fórmulas,Regressão linear,49.0,66.7,avaliacao_formulas.csv
+72 originais (referência),SVM,43.7,68.0,avaliacao_formulas.csv

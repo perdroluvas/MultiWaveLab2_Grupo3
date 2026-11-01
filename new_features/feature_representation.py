@@ -23,7 +23,7 @@ different object that is still usable by the machine learning stage.
 
 Representations exposed
 -----------------------
-ratio            four dimensionless ratios between original features:
+ratio            four derived features from original features:
                  real heart rate, relative systolic width, normalized crest
                  time and the coefficient of variation of the pulse interval
 
@@ -87,7 +87,7 @@ REPR_PREFIX = "repr_"
 @dataclass(frozen=True)
 class RatioRule:
     """
-    Definition of a single dimensionless ratio.
+    Definition of a derived ratio or rate.
 
     The resulting column is::
 
@@ -113,7 +113,7 @@ class RatioRule:
     description: str = ""
 
 
-#: The catalogue of ratios. Every entry is dimensionless by construction.
+#: The catalogue of ratios. The beat-rate feature is in Hz; the other three are dimensionless.
 RATIO_RULES: tuple[RatioRule, ...] = (
     RatioRule(
         name="ppg_beat_rate_hz",
@@ -219,24 +219,21 @@ def select_feature_columns(
 def _safe_ratio(
     numerator: pd.Series,
     denominator: pd.Series,
-    min_relative_denominator: float = 1e-3,
 ) -> pd.Series:
     """
     Element-wise ratio that maps an unusable denominator to NaN.
 
-    A ratio is only meaningful when the denominator has a stable and non-zero
-    scale. A denominator that is (almost) zero for some rows produces values
-    of arbitrary magnitude, so it is replaced by NaN. The threshold is
-    relative to the typical magnitude of the denominator, which makes the
-    guard independent of the unit of the feature.
+    The guard uses a fixed numerical tolerance, not a statistic estimated
+    from the input rows. In this way, the same transformation is applied to
+    train, validation and test without learning anything from those sets.
+    Missing and infinite results are left as NaN for the regression pipeline
+    to handle using its training folds only.
     """
     den = pd.to_numeric(denominator, errors="coerce")
-    typical = float(np.nanmedian(np.abs(den.to_numpy(dtype=float)))) if den.notna().any() else 0.0
-    threshold = min_relative_denominator * typical
-    if np.isfinite(threshold) and threshold > 0:
-        den = den.where(den.abs() > threshold, np.nan)
+    den = den.replace([np.inf, -np.inf], np.nan)
     den = den.where(den.abs() > EPS, np.nan)
-    return pd.to_numeric(numerator, errors="coerce") / den
+    values = pd.to_numeric(numerator, errors="coerce") / den
+    return values.replace([np.inf, -np.inf], np.nan)
 
 
 def _product_of_columns(
@@ -330,7 +327,7 @@ def build_ratio_features(
     sampling_rate: float | None = None,
 ) -> tuple[pd.DataFrame, list[str], list[dict[str, Any]]]:
     """
-    Build dimensionless ratios from the original features.
+    Build derived ratios and rates from the original features.
 
     The idea: an absolute value (amplitude in ADC units, power in dB^2/Hz,
     time in seconds) depends on the sensor, on the contact pressure and on

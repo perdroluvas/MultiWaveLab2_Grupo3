@@ -2,19 +2,20 @@
 Gerar as visualizações da representação construída a partir das features originais.
 
 As figuras são gravadas em ``features0_stats/figures/<sufixo>/`` (ou na pasta
-indicada com ``--output-dir``). O script lê o arquivo ``features0_repr.csv``
-gerado por ``run_feature_representation.py``.
+indicada com ``--output-dir``). O script lê o arquivo ``features0_train_repr.csv`` gerado por
+``run_feature_representation.py``. O teste reservado não entra nos gráficos.
 
 Uso, a partir da pasta ``src``::
 
     python ../new_features/visualize_representation.py \
-        ../config_experiments/input_ieb1/exp0.json
+        ../config_experiments/input_all_ppgs/exp0.json
 
 Figuras geradas
 ---------------
 01_as_quatro_features.png
     As quatro features novas juntas (2x2), cada uma contra a GLC, com a
-    correlação de Spearman e a reta de tendência. Usa todos os participantes.
+    correlação de Spearman e a reta de tendência. Usa só o treino e calcula
+    uma média por participante quando existem várias gravações.
 02_mapa_correlacao.png
     Mapa de calor da correlação (Spearman) entre as quatro features e a GLC.
 """
@@ -37,7 +38,6 @@ from _bootstrap import ensure_import_paths
 
 ensure_import_paths()
 
-from datasets_util.naming_conventions import DatasetConfig
 from feature_representation import REPR_PREFIX, RATIO_RULES, TARGET_COLUMN
 
 RESULTS_FOLDER = Path(__file__).resolve().parent / "results"
@@ -93,6 +93,18 @@ def _n_participants(df: pd.DataFrame) -> int:
     if "participant_id" in df.columns:
         return int(df["participant_id"].nunique())
     return len(df)
+
+
+def _by_participant(df: pd.DataFrame) -> pd.DataFrame:
+    """Uma observação por participante para os gráficos e correlações."""
+    if "participant_id" not in df.columns:
+        raise ValueError("Os dados precisam da coluna participant_id.")
+    columns = _expected_columns(df)
+    if TARGET_COLUMN not in df.columns:
+        raise ValueError(f"A coluna {TARGET_COLUMN} não foi encontrada.")
+    numeric = df[columns + [TARGET_COLUMN]].apply(pd.to_numeric, errors="coerce")
+    numeric["participant_id"] = df["participant_id"]
+    return numeric.groupby("participant_id", as_index=False).mean(numeric_only=True)
 
 
 def plot_four_features(df: pd.DataFrame, output: Path) -> None:
@@ -216,11 +228,6 @@ def write_result_tables(df: pd.DataFrame, folder: Path) -> None:
         return
     columns = _expected_columns(df)
 
-    id_columns = [c for c in ("participant_id", TARGET_COLUMN) if c in df.columns]
-    df[id_columns + columns].to_csv(
-        folder / "dados_por_participante.csv", index=False
-    )
-
     rows = []
     for name in columns:
         x = pd.to_numeric(df[name], errors="coerce")
@@ -247,6 +254,8 @@ def write_result_tables(df: pd.DataFrame, folder: Path) -> None:
 
 
 def main() -> None:
+    from datasets_util.naming_conventions import DatasetConfig
+
     parser = argparse.ArgumentParser(description="Visualizações da nova representação.")
     parser.add_argument(
         "json_file",
@@ -266,9 +275,10 @@ def main() -> None:
     args = parser.parse_args()
 
     dataset_config = DatasetConfig(args.json_file)
-    features_folder = Path(dataset_config.get_dataset_features_path())
-    stem = Path(dataset_config.get_features_file_name()).stem
-    input_file = features_folder / f"{stem}{args.suffix}.csv"
+    if dataset_config.get_value("DATASET_NAME") != "all_ppgs" or dataset_config.modalities != ["ppg"]:
+        raise ValueError("Esta etapa usa apenas DATASET_NAME=all_ppgs e MODALITIES=ppg.")
+    train_file = Path(dataset_config.get_splitted_features_file_name("train"))
+    input_file = train_file.with_name(f"{train_file.stem}{args.suffix}.csv")
 
     if not input_file.exists():
         raise FileNotFoundError(
@@ -285,6 +295,7 @@ def main() -> None:
 
     print(f"lendo: {input_file}")
     df = pd.read_csv(input_file)
+    df = _by_participant(df)
     print(
         f"linhas: {len(df)} | participantes: {_n_participants(df)} | "
         f"colunas repr_: {sum(c.startswith(REPR_PREFIX) for c in df.columns)}"
@@ -295,13 +306,6 @@ def main() -> None:
 
     RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)
     write_result_tables(df, RESULTS_FOLDER)
-    shutil.copy2(input_file, RESULTS_FOLDER / input_file.name)
-    report_file = (
-        Path(dataset_config.get_statistics_output_folder())
-        / "feature_representation_report.json"
-    )
-    if report_file.exists():
-        shutil.copy2(report_file, RESULTS_FOLDER / report_file.name)
     if output.resolve() != RESULTS_FOLDER.resolve():
         for name in FIGURE_NAMES:
             source = output / name

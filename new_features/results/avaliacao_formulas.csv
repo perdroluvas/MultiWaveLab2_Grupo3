@@ -1,0 +1,14 @@
+features,modelo,mae_medio,rmse_medio,desvio_entre_folds,desvio_rmse_entre_folds,ganho_vs_media,pct_folds_melhor_que_media
+nenhuma (média),Dummy,51.1,69.5,6.9,15.9,0.0,
+72 originais,Regressão linear,436899.3,1631043.1,976521.7,3646215.3,-436848.1,0.0
+72 originais,KNN,50.0,68.9,3.8,14.0,1.1,80.0
+72 originais,Árvore de decisão,52.0,74.5,11.7,11.4,-0.8,80.0
+72 originais,SVM,43.7,68.0,9.5,19.0,7.5,100.0
+72 originais + 4 novas,Regressão linear,401192.4,1495793.0,896539.3,3343493.1,-401141.2,0.0
+72 originais + 4 novas,KNN,50.8,70.3,3.4,14.8,0.3,80.0
+72 originais + 4 novas,Árvore de decisão,52.0,74.5,11.7,11.4,-0.8,80.0
+72 originais + 4 novas,SVM,43.8,67.8,10.0,19.1,7.4,100.0
+só as 4 novas,Regressão linear,49.0,66.7,5.7,13.1,2.2,80.0
+só as 4 novas,KNN,51.3,69.3,5.9,13.5,-0.1,60.0
+só as 4 novas,Árvore de decisão,49.2,68.7,7.1,13.4,1.9,60.0
+só as 4 novas,SVM,48.4,74.2,8.3,13.8,2.8,80.0
