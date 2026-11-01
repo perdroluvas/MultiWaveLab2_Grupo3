@@ -15,26 +15,27 @@ Representações comparadas:
     PCA            componentes das 72 originais (não usa a glicose)
     PLS            componentes das 72 originais orientados pela glicose
 
-Modelos: regressão linear, KNN, árvore de decisão e SVM, com as grades de
-``evaluate_formulas._models``. O Dummy (prevê a média do treino) é o piso.
+Regressor: um só, o SVM (``MODEL_NAME``), igual para todas as
+representações. O trabalho compara representações, não regressores: escolher
+o melhor regressor é o tema de outro grupo. O Dummy (prevê a glicose média do
+treino) é a referência.
 
 1. **Nested CV, só no treino.** Divisão externa em 5 partes por
    participante, repetida ``N_REPEATS`` vezes com sorteios diferentes; divisão
-   interna em 3 partes para escolher os hiperparâmetros. No PCA e no PLS, o
-   número de componentes também é escolhido na divisão interna. Imputação,
-   padronização e PCA/PLS são ajustados só no treino de cada fold.
-2. **Escolha.** Em cada representação, o modelo com menor RMSE médio na
-   divisão externa (mesma métrica de ``src/machinelearning/regression_evaluation.py``).
-3. **Teste, uma vez só.** O modelo escolhido de cada representação é
-   reajustado em todo o treino (hiperparâmetros pela divisão interna) e prevê
-   o conjunto de teste oficial. Nenhuma escolha usa o teste.
+   interna em 3 partes para escolher os ajustes do SVM e, no PCA e no PLS, o número
+   de componentes. Imputação, padronização e PCA/PLS são ajustados só no
+   treino de cada fold. A escolha interna usa RMSE, como em
+   ``src/machinelearning/regression_evaluation.py``.
+2. **Teste, uma vez só.** Cada representação é reajustada em todo o treino
+   (ajustes e componentes pela divisão interna) e prevê o conjunto de teste
+   oficial. Nenhuma escolha usa o teste.
 
 Saídas em ``new_features/results/``:
 
-avaliacao_final_nested_cv.csv   todas as combinações representação × modelo
-avaliacao_final.csv             o modelo escolhido de cada representação,
-                                com o erro na nested CV e no teste
-03_avaliacao_final.png          MAE de cada representação ao lado do Dummy
+avaliacao_final_nested_cv.csv   nested CV de cada representação
+avaliacao_final.csv             nested CV e teste de cada representação
+03_avaliacao_final.png          RMSE de cada representação ao lado da baseline (72 originais)
+04_colunas_vs_erro.png          colunas de cada representação × RMSE
 
 Uso, a partir de ``src/``::
 
@@ -49,6 +50,7 @@ import warnings
 from pathlib import Path
 
 import matplotlib
+import matplotlib.ticker
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -79,9 +81,11 @@ from evaluate_pls import PLSFeatureExtractor
 from feature_representation import TARGET_COLUMN
 
 N_REPEATS = 5
-COMPONENTS = (2, 4, 8, 12)
+MODEL_NAME = "SVM"
+COMPONENTS = (2, 4, 8, 12, 16, 24)
 DUMMY = "nenhuma (média)"
 FAMILIES = ("72 originais", "4 fórmulas", "PCA", "PLS")
+BASELINE = "72 originais"
 
 
 def _columns(df: pd.DataFrame, family: str) -> list[str]:
@@ -169,12 +173,23 @@ def nested_cv_table(train: pd.DataFrame) -> pd.DataFrame:
 
     base_mae, base_rmse = scores("72 originais", DummyRegressor(), {}, np.zeros((len(y), 1)))
     rows = [_row(DUMMY, "Dummy", base_mae, base_rmse, base_mae, base_rmse)]
+    folds = {DUMMY: (base_mae, base_rmse)}
+    model, params = _models()[MODEL_NAME]
     for family in FAMILIES:
+        print(f"  nested CV: {family} / {MODEL_NAME}", flush=True)
         X = _matrix(train, _columns(train, family))
-        for name, (model, params) in _models().items():
-            print(f"  nested CV: {family} / {name}", flush=True)
-            mae, rmse = scores(family, model, params, X)
-            rows.append(_row(family, name, mae, rmse, base_mae, base_rmse))
+        mae, rmse = scores(family, model, params, X)
+        folds[family] = (mae, rmse)
+        rows.append(_row(family, MODEL_NAME, mae, rmse, base_mae, base_rmse))
+    # The baseline of the theme is the 72 original features: each
+    # representation minus the baseline, fold by fold (negative = lower error).
+    ref_mae, ref_rmse = folds[BASELINE]
+    for row in rows:
+        mae, rmse = folds[row["representacao"]]
+        row["dif_mae_vs_baseline"] = (mae - ref_mae).mean()
+        row["desvio_dif_mae_vs_baseline"] = (mae - ref_mae).std(ddof=1)
+        row["dif_rmse_vs_baseline"] = (rmse - ref_rmse).mean()
+        row["desvio_dif_rmse_vs_baseline"] = (rmse - ref_rmse).std(ddof=1)
     return pd.DataFrame(rows)
 
 
@@ -199,25 +214,14 @@ def _row(family, model, mae, rmse, base_mae, base_rmse) -> dict:
     }
 
 
-def choose_models(cv_table: pd.DataFrame) -> pd.DataFrame:
-    """Uma linha por representação: o modelo de menor RMSE na nested CV."""
-    chosen = (
-        cv_table.sort_values("rmse_nested_cv", kind="stable")
-        .groupby("representacao", sort=False)
-        .head(1)
-    )
-    order = {name: i for i, name in enumerate((DUMMY, *FAMILIES))}
-    return chosen.sort_values("representacao", key=lambda s: s.map(order)).reset_index(drop=True)
-
-
-def test_table(train: pd.DataFrame, test: pd.DataFrame, chosen: pd.DataFrame) -> pd.DataFrame:
-    """Reajusta cada escolha em todo o treino e avalia uma vez no teste."""
+def test_table(train: pd.DataFrame, test: pd.DataFrame, cv_table: pd.DataFrame) -> pd.DataFrame:
+    """Reajusta cada representação em todo o treino e avalia uma vez no teste."""
     models = {**_models(), "Dummy": (DummyRegressor(), {})}
     y_train = train[TARGET_COLUMN].to_numpy(dtype=float)
     y_test = test[TARGET_COLUMN].to_numpy(dtype=float)
     groups = train["participant_id"].astype(str).to_numpy()
     rows = []
-    for _, row in chosen.iterrows():
+    for _, row in cv_table.iterrows():
         family, name = row["representacao"], row["modelo"]
         model, params = models[name]
         if name == "Dummy":
@@ -245,71 +249,138 @@ def test_table(train: pd.DataFrame, test: pd.DataFrame, chosen: pd.DataFrame) ->
         )
     table = pd.DataFrame(rows)
     dummy = table.loc[table["representacao"] == DUMMY].iloc[0]
+    baseline = table.loc[table["representacao"] == BASELINE].iloc[0]
     for metric in ("mae", "rmse"):
         table[f"ganho_{metric}_teste"] = dummy[f"{metric}_teste"] - table[f"{metric}_teste"]
+        table[f"dif_{metric}_teste_vs_baseline"] = table[f"{metric}_teste"] - baseline[f"{metric}_teste"]
     return table
 
 
 def plot_final(final: pd.DataFrame, path: Path) -> None:
-    """MAE de cada representação ao lado do Dummy: nested CV e teste.
+    """RMSE de cada representação nova ao lado da baseline (as 72 originais).
 
-    O Dummy (chutar a média) é uma barra como as outras, em cinza, para que a
-    comparação com ele se veja direto: a menor barra é a que erra menos.
+    A baseline do tema são as 72 features originais (cinza); as representações
+    novas ficam em azul. O Dummy (prever sempre a glicose média do treino) é só
+    uma linha de contexto: o erro de quem não usa o PPG.
     """
-    blue, grey = "#2a78d6", "#898781"
+    blue, grey, line = "#2a78d6", "#898781", "#52514e"
     ink, muted, grid = "#0b0b0b", "#52514e", "#e1e0d9"
-    order = (DUMMY, *FAMILIES)
+    order = FAMILIES
     rows = final.set_index("representacao").loc[list(order)].reset_index()
-    mean_glc = float(rows["glc_media_treino"].iloc[0])
-    names = [f"sempre {mean_glc:.0f} mg/dL\n(média do treino)" if r == DUMMY else f"{r}\n({m})"
-             for r, m in zip(rows["representacao"], rows["modelo"])]
-    colors = [grey if r == DUMMY else blue for r in rows["representacao"]]
+    dummy = final.loc[final["representacao"] == DUMMY].iloc[0]
+    mean_glc = float(dummy["glc_media_treino"])
+    names = [f"{r}\n(baseline)" if r == BASELINE else r for r in rows["representacao"]]
+    colors = [grey if r == BASELINE else blue for r in rows["representacao"]]
     x = np.arange(len(rows))
-    n_train = int(rows["n_participantes_treino"].iloc[0])
-    n_test = int(rows["n_participantes_teste"].iloc[0])
+    n_train = int(dummy["n_participantes_treino"])
+    n_test = int(dummy["n_participantes_teste"])
     panels = (
-        ("mae_nested_cv", f"Nested CV no treino ({n_train} pessoas)"),
-        ("mae_teste", f"Teste ({n_test} pessoas, uma avaliação)"),
+        ("rmse_nested_cv", f"Nested CV no treino ({n_train} pessoas)"),
+        ("rmse_teste", f"Teste ({n_test} pessoas, uma avaliação)"),
     )
 
     figure, axes = plt.subplots(1, 2, figsize=(12, 4.6), sharey=True)
     for axis, (column, title) in zip(axes, panels):
         values = rows[column].to_numpy()
         axis.bar(x, values, 0.62, color=colors)
-        axis.axhline(values[0], color=grey, lw=1, ls=(0, (4, 3)))
-        best = int(np.argmin(values))
+        axis.axhline(dummy[column], color=line, lw=1, ls=(0, (4, 3)))
         for xi, value in zip(x, values):
-            axis.text(xi, value + 0.8, f"{value:.1f}".replace(".", ","), ha="center",
-                      va="bottom", fontsize=9, color=ink,
-                      fontweight="bold" if xi == best else "normal")
+            axis.text(xi, value / 2, f"{value:.1f}".replace(".", ","), ha="center",
+                      va="center", fontsize=9, color="white")
         axis.set_xticks(x)
         axis.set_xticklabels(names, fontsize=9, color=ink)
-        axis.set_title(title, fontsize=11, color=ink)
+        axis.set_title(title, fontsize=11, color=ink, pad=18)
+        axis.text(0.5, 1.0, f"tracejado = sem PPG (sempre {mean_glc:.0f} mg/dL): "
+                  f"{dummy[column]:.1f}".replace(".", ","), transform=axis.transAxes,
+                  ha="center", va="bottom", fontsize=8, color=muted)
         axis.grid(axis="y", color=grid, lw=0.8)
         axis.set_axisbelow(True)
         for side in ("top", "right"):
             axis.spines[side].set_visible(False)
         axis.tick_params(colors=muted, labelsize=8)
-    spread = rows.loc[rows["representacao"] != DUMMY, "desvio_ganho_mae"]
+    spread = rows.loc[rows["representacao"] != BASELINE, "desvio_dif_rmse_vs_baseline"]
     axes[0].text(
         0.5, 0.97,
-        f"a diferença para o cinza varia ±{spread.min():.0f} a ±{spread.max():.0f} mg/dL entre folds".replace(".", ","),
+        f"a diferença para a baseline varia ±{spread.min():.0f} a ±{spread.max():.0f} mg/dL entre folds".replace(".", ","),
         transform=axes[0].transAxes, ha="center", va="top", fontsize=8, color=muted,
     )
-    axes[0].set_ylabel("erro médio da glicose, MAE (mg/dL)", fontsize=9, color=muted)
-    axes[0].set_ylim(0, rows[["mae_nested_cv", "mae_teste"]].to_numpy().max() * 1.22)
+    axes[0].set_ylabel("erro da glicose, RMSE (mg/dL)", fontsize=9, color=muted)
+    axes[0].set_ylim(0, max(rows[["rmse_nested_cv", "rmse_teste"]].to_numpy().max(),
+                            dummy["rmse_nested_cv"]) * 1.22)
     figure.suptitle(
-        f"Comparado a prever sempre {mean_glc:.0f} mg/dL: na nested CV as diferenças são pequenas; "
-        "no teste, ninguém erra menos — All-PPGs, PPG",
+        "Representações novas ao lado da baseline (as 72 features originais) — All-PPGs, PPG",
         fontsize=12, color=ink,
     )
     figure.text(
         0.5, 0.005,
-        f"Cinza = Dummy: ignora o PPG e prevê para todos a glicose média do treino ({mean_glc:.0f} mg/dL). "
-        "Menor barra = menor erro (em negrito). Modelo de cada representação escolhido por nested CV.",
+        "Cinza = baseline (72 features originais); azul = representações novas construídas a partir delas. "
+        f"Todas com o mesmo regressor ({MODEL_NAME}), só como instrumento de medida.",
         ha="center", fontsize=8, color=muted,
     )
     figure.tight_layout(rect=(0, 0.04, 1, 0.95))
+    figure.savefig(path, dpi=150, facecolor="#fcfcfb")
+    plt.close(figure)
+
+
+def plot_compactness(final: pd.DataFrame, path: Path) -> None:
+    """Quantas colunas cada representação usa × quanto ela erra (RMSE, nested CV).
+
+    É o resumo da *nova representação*: o eixo x é o tamanho da representação
+    (colunas que o modelo recebe) e o eixo y, o erro. A linha cinza é a
+    baseline (as 72 originais).
+    """
+    blue, grey = "#2a78d6", "#898781"
+    ink, muted, grid = "#0b0b0b", "#52514e", "#e1e0d9"
+    baseline = final.loc[final["representacao"] == BASELINE].iloc[0]
+    rows = final.loc[final["representacao"] != DUMMY].reset_index(drop=True)
+
+    def n_columns(row) -> int:
+        params = row["hiperparametros"]
+        if "extract__n_components" in params:
+            return int(params.split("extract__n_components': ")[1].split(",")[0])
+        return len(EXPECTED_REPR) if row["representacao"] == "4 fórmulas" else 72
+
+    sizes = rows.apply(n_columns, axis=1).to_numpy()
+    errors = rows["rmse_nested_cv"].to_numpy()
+    spread = rows["desvio_dif_rmse_vs_baseline"].to_numpy()
+
+    figure, axis = plt.subplots(figsize=(8.5, 4.6))
+    axis.axhline(baseline["rmse_nested_cv"], color=grey, lw=1.2, ls=(0, (4, 3)))
+    axis.text(40, baseline["rmse_nested_cv"] + 0.25,
+              f"baseline (72 originais): {baseline['rmse_nested_cv']:.1f}".replace(".", ","),
+              ha="right", va="bottom", fontsize=8, color=muted)
+    axis.errorbar(sizes, errors, yerr=spread, fmt="none", ecolor=muted, elinewidth=1, capsize=3)
+    point_colors = [grey if r == BASELINE else blue for r in rows["representacao"]]
+    axis.scatter(sizes, errors, s=70, color=point_colors, zorder=3,
+                 edgecolor="#fcfcfb", linewidth=1.5)
+    for size, error, name in zip(sizes, errors, rows["representacao"]):
+        label = f"{name}\n{size} colunas · {error:.1f}".replace(".", ",")
+        axis.annotate(label, (size, error), xytext=(8, -2), textcoords="offset points",
+                      fontsize=8.5, color=ink, va="top",
+                      bbox={"facecolor": "#fcfcfb", "edgecolor": "none", "pad": 1.5})
+    axis.set_xscale("log")
+    axis.set_xticks([2, 4, 8, 16, 32, 72])
+    axis.set_xticklabels(["2", "4", "8", "16", "32", "72"])
+    axis.xaxis.set_minor_locator(matplotlib.ticker.NullLocator())
+    axis.set_xlim(1.5, 110)
+    axis.set_xlabel("colunas que o modelo recebe (escala logarítmica)", fontsize=9, color=muted)
+    axis.set_ylabel("RMSE na nested CV (mg/dL)", fontsize=9, color=muted)
+    axis.set_title(
+        "Quantas colunas cada representação usa e quanto ela erra",
+        fontsize=11, color=ink,
+    )
+    axis.grid(color=grid, lw=0.8)
+    axis.set_axisbelow(True)
+    for side in ("top", "right"):
+        axis.spines[side].set_visible(False)
+    axis.tick_params(colors=muted, labelsize=8)
+    figure.text(
+        0.5, 0.005,
+        "Barras: ± desvio da diferença para a baseline entre os 25 folds. "
+        f"Componentes do PCA/PLS: os escolhidos no ajuste final. Todas com {MODEL_NAME}.",
+        ha="center", fontsize=7.5, color=muted,
+    )
+    figure.tight_layout(rect=(0, 0.04, 1, 1))
     figure.savefig(path, dpi=150, facecolor="#fcfcfb")
     plt.close(figure)
 
@@ -323,13 +394,13 @@ def main() -> None:
     train, test = load_train_test(args.json_file)
 
     cv_table = nested_cv_table(train)
-    chosen = choose_models(cv_table)
-    final = test_table(train, test, chosen)
+    final = test_table(train, test, cv_table)
 
     RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)
     cv_table.to_csv(RESULTS_FOLDER / "avaliacao_final_nested_cv.csv", index=False, float_format="%.3f")
     final.to_csv(RESULTS_FOLDER / "avaliacao_final.csv", index=False, float_format="%.3f")
     plot_final(final, RESULTS_FOLDER / "03_avaliacao_final.png")
+    plot_compactness(final, RESULTS_FOLDER / "04_colunas_vs_erro.png")
 
     columns = ["representacao", "modelo", "mae_nested_cv", "desvio_mae",
                "rmse_nested_cv", "mae_teste", "rmse_teste", "hiperparametros"]

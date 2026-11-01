@@ -52,23 +52,28 @@ class AvaliacaoFinalTest(unittest.TestCase):
         for fit_idx, val_idx in evaluate_final.outer_splits(groups):
             self.assertFalse(set(groups[fit_idx]) & set(groups[val_idx]))
 
-    def test_escolha_nao_depende_do_teste(self):
-        chosen = evaluate_final.choose_models(evaluate_final.nested_cv_table(self.train))
+    def test_um_regressor_para_todas_as_representacoes(self):
+        cv_table = evaluate_final.nested_cv_table(self.train)
         self.assertEqual(
-            list(chosen["representacao"]),
+            list(cv_table["representacao"]),
             [evaluate_final.DUMMY, *evaluate_final.FAMILIES],
         )
+        models = cv_table.loc[cv_table["representacao"] != evaluate_final.DUMMY, "modelo"]
+        self.assertEqual(set(models), {evaluate_final.MODEL_NAME})
+
+    def test_escolha_nao_depende_do_teste(self):
+        cv_table = evaluate_final.nested_cv_table(self.train)
         shifted = self.test.assign(GLC=self.test["GLC"] + 1000)
-        first = evaluate_final.test_table(self.train, self.test, chosen)
-        second = evaluate_final.test_table(self.train, shifted, chosen)
+        first = evaluate_final.test_table(self.train, self.test, cv_table)
+        second = evaluate_final.test_table(self.train, shifted, cv_table)
         # Same choices and hyperparameters; only the test error changes.
         pd.testing.assert_series_equal(first["modelo"], second["modelo"])
         pd.testing.assert_series_equal(first["hiperparametros"], second["hiperparametros"])
         self.assertTrue((second["mae_teste"] > first["mae_teste"]).all())
 
     def test_componentes_escolhidos_na_divisao_interna(self):
-        chosen = evaluate_final.choose_models(evaluate_final.nested_cv_table(self.train))
-        final = evaluate_final.test_table(self.train, self.test, chosen)
+        cv_table = evaluate_final.nested_cv_table(self.train)
+        final = evaluate_final.test_table(self.train, self.test, cv_table)
         for family in ("PCA", "PLS"):
             params = final.loc[final["representacao"] == family, "hiperparametros"].iloc[0]
             self.assertIn("extract__n_components", params)

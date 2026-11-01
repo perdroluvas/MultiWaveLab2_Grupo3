@@ -126,7 +126,8 @@ def _models() -> dict[str, tuple[object, dict]]:
             SVR(),
             {
                 "model__kernel": ["linear", "rbf"],
-                "model__C": [0.1, 1.0, 10.0, 100.0],
+                # Up to 1000: with 100 as the top value, C was chosen on the grid edge.
+                "model__C": [0.1, 1.0, 10.0, 100.0, 1000.0],
                 "model__epsilon": [1.0, 10.0],
             },
         ),
