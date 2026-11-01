@@ -1,28 +1,26 @@
 # Resultados — Grupo 3 / All-PPGs / PPG
 
-Os arquivos desta pasta registram os resultados agregados da **nested CV com GroupKFold por participante** (5 folds externos × 3 internos). **A subpasta `ieb1_legacy/` é histórica** e NÃO é lida pelo script de gráficos agregados.
+Resultados da avaliação das representações (72 originais, 4 fórmulas, PCA e PLS), todas com o mesmo regressor (SVM), comparadas com a baseline (as 72 originais): **nested CV com `GroupKFold` por participante** no treino (5 folds externos × 5 repetições, 3 internos) e **uma avaliação no teste oficial**.
 
 | Arquivo | Significado |
 |---|---|
-| `avaliacao_formulas.csv` | Quatro fórmulas, 72 originais e 72 originais + quatro novas (4 regressores e Dummy) |
-| `avaliacao_pca_cv.csv` | PCA com 4, 8 e 12 componentes × 4 regressores e Dummy |
-| `avaliacao_pls_cv.csv` | PLS com 2, 4, 8 e 12 componentes × 4 regressores e Dummy |
-| `redundancia.csv` | Correlação de Spearman de cada fórmula nova com a original mais associada, no treino All-PPGs |
-| `comparacao_representacoes.csv` | **Quatro linhas** selecionadas, extraídas automaticamente dos três CSVs anteriores |
-| `01_comparacao_mae.png` | Gráfico do MAE das quatro combinações selecionadas |
-| `02_comparacao_rmse.png` | Gráfico do RMSE das quatro combinações selecionadas |
-| `ieb1_legacy/` | Histórico IEB-1 (preservado, não comparado numericamente ao All-PPGs) |
+| `01_as_quatro_features.png` | As 4 fórmulas contra a glicose (uma média por pessoa, treino) |
+| `02_mapa_correlacao.png` | Correlação entre as 4 fórmulas e a glicose |
+| `03_avaliacao_final.png` | RMSE de cada representação nova ao lado da baseline (72 originais), na nested CV e no teste |
+| `04_colunas_vs_erro.png` | Quantas colunas cada representação usa × RMSE na nested CV |
+| `05_pca_variancia.png` | Quanto da variação das 72 features o PCA guarda com cada número de componentes |
+| `06_pca_pls_glicose.png` | As mesmas gravações do treino nos 2 primeiros componentes do PCA e do PLS, coloridas pela glicose |
+| `avaliacao_final.csv` | Nested CV e teste de cada representação, com a diferença para a baseline |
+| `avaliacao_final_nested_cv.csv` | Nested CV de cada representação (média e desvio entre os 25 folds externos) |
+| `resumo_estatistico.csv` | Média, desvio, mínimo, máximo e correlação com a glicose das 4 fórmulas |
+| `redundancia.csv` | Correlação de Spearman de cada fórmula nova com a característica original mais parecida, no treino do All-PPGs |
 
-**A seleção das quatro linhas** corresponde à tabela apresentada ao grupo e está declarada em `../config/comparacao_destaques.json`. Não equivale ao menor MAE ou RMSE de todos os métodos, pois as métricas podem apontar para modelos diferentes.
-
-**Atualizar os gráficos e o CSV-resumo**, da raiz do MultiWaveLab2, após novas execuções dos scripts de avaliação:
+**Atualizar**, a partir de `src/`, depois de gerar as colunas `repr_` (ver `../README.md`, seção 7):
 
 ```bash
-python new_features/visualize_cv_results.py
+PYTHONPATH=. python ../new_features/evaluate_final.py ../config_experiments/input_all_ppgs/exp0.json
+PYTHONPATH=. python ../new_features/visualize_pca_pls.py ../config_experiments/input_all_ppgs/exp0.json
+PYTHONPATH=. python ../new_features/visualize_representation.py ../config_experiments/input_all_ppgs/exp0.json
 ```
 
-A geração de imagens não utiliza dados individuais, arquivos de teste ou figuras históricas. Se alguma combinação configurada não estiver disponível, a execução **falha com um erro**, sem reutilizar valores antigos. Consulte `../README.md` para o protocolo, métodos e comandos completos de reprodução.
-
-**Observação de precisão:** `avaliacao_formulas.csv` foi gravado com uma casa decimal; os CSVs de PCA/PLS têm três casas. No gráfico mostramos duas casas apenas para padronizar a apresentação.
-
-**Compartilhamento:** a subpasta IEB-1 contém arquivos por participante. Antes de publicar este ZIP externamente, verificar as regras aplicáveis aos dados originais.
+**Compartilhamento:** os CSVs desta pasta trazem identificadores de participantes e valores de glicose. Antes de publicar externamente, verificar as regras aplicáveis aos dados originais.

@@ -1,0 +1,5 @@
+feature,media,desvio_padrao,minimo,maximo,spearman_rho_glc,p_valor,n
+repr_ppg_beat_rate_hz,1.2422,0.2076,0.8008,1.8969,0.231,0.0217,99
+repr_ppg_b2_width_over_period,0.4331,0.0851,0.3094,0.7143,-0.269,0.0071,99
+repr_ppg_b2_crest_time_over_period,0.3328,0.0613,0.2516,0.5846,0.159,0.1152,99
+repr_ppg_p1_rr_cv,0.0852,0.1173,0.0147,1.1191,-0.142,0.1602,99

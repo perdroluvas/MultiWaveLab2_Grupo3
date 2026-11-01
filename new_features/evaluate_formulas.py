@@ -114,7 +114,8 @@ def _models() -> dict[str, tuple[object, dict]]:
         "Regressão linear": (LinearRegression(), {}),
         "KNN": (
             KNeighborsRegressor(),
-            {"model__n_neighbors": [3, 5, 7, 9, 15], "model__p": [1, 2]},
+            # Every k from 1 to 21, plus 31: the chosen k must not sit on the grid edge.
+            {"model__n_neighbors": [*range(1, 22), 31], "model__p": [1, 2]},
         ),
         # max_depth = 1 is a decision stump.
         "Árvore de decisão": (
@@ -125,7 +126,8 @@ def _models() -> dict[str, tuple[object, dict]]:
             SVR(),
             {
                 "model__kernel": ["linear", "rbf"],
-                "model__C": [0.1, 1.0, 10.0, 100.0],
+                # Up to 1000: with 100 as the top value, C was chosen on the grid edge.
+                "model__C": [0.1, 1.0, 10.0, 100.0, 1000.0],
                 "model__epsilon": [1.0, 10.0],
             },
         ),
@@ -296,19 +298,9 @@ def independent_test(
     )
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
-    parser.add_argument(
-        "json_file", metavar="JSON_FILE",
-        help="JSON All-PPGs/PPG do experimento, usado para localizar treino e teste.",
-    )
-    parser.add_argument(
-        "--evaluate-test", action="store_true",
-        help="Avalia explicitamente no teste reservado (não usar para explorar alternativas).",
-    )
-    args = parser.parse_args()
-
-    with open(args.json_file, "r", encoding="utf-8") as handle:
+def load_train_test(json_file: str) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Lê treino e teste ``_repr`` do All-PPGs e confere as listas oficiais."""
+    with open(json_file, "r", encoding="utf-8") as handle:
         config = json.load(handle)
     if config.get("DATASET_NAME") != "all_ppgs" or config.get("MODALITIES") != "ppg":
         raise ValueError("Esta etapa usa apenas DATASET_NAME=all_ppgs e MODALITIES=ppg.")
@@ -358,6 +350,22 @@ def main() -> None:
         f"treino: {len(train)} linhas / {train['participant_id'].nunique()} participantes; "
         f"teste reservado: {len(test)} linhas / {test['participant_id'].nunique()} participantes"
     )
+    return train, test
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+    parser.add_argument(
+        "json_file", metavar="JSON_FILE",
+        help="JSON All-PPGs/PPG do experimento, usado para localizar treino e teste.",
+    )
+    parser.add_argument(
+        "--evaluate-test", action="store_true",
+        help="Avalia explicitamente no teste reservado (não usar para explorar alternativas).",
+    )
+    args = parser.parse_args()
+
+    train, test = load_train_test(args.json_file)
 
     redundancy = redundancy_table(train)
     RESULTS_FOLDER.mkdir(parents=True, exist_ok=True)

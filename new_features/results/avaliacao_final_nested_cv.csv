@@ -1,0 +1,6 @@
+representacao,modelo,mae_nested_cv,desvio_mae,rmse_nested_cv,desvio_rmse,ganho_mae_nested_cv,desvio_ganho_mae,ganho_rmse_nested_cv,desvio_ganho_rmse,pct_folds_rmse_melhor_que_media,n_folds_externos,dif_mae_vs_baseline,desvio_dif_mae_vs_baseline,dif_rmse_vs_baseline,desvio_dif_rmse_vs_baseline
+nenhuma (média),Dummy,50.785,6.971,69.171,15.594,0.000,0.000,0.000,0.000,,25,6.369,4.065,1.336,3.474
+72 originais,SVM,44.416,9.222,67.835,17.636,6.369,4.065,1.336,3.474,64.000,25,0.000,0.000,0.000,0.000
+4 fórmulas,SVM,48.332,9.430,73.587,17.052,2.453,4.997,-4.416,8.306,24.000,25,3.916,5.898,5.751,8.408
+PCA,SVM,45.534,9.310,71.858,19.696,5.251,6.347,-2.687,14.938,60.000,25,1.118,4.741,4.023,14.034
+PLS,SVM,43.771,11.910,67.285,18.511,7.013,7.783,1.886,5.599,68.000,25,-0.644,5.279,-0.550,4.412
