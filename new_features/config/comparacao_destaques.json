@@ -1,0 +1,26 @@
+[
+  {
+    "representacao": "PLS 2",
+    "arquivo": "avaliacao_pls_cv.csv",
+    "features": "PLS 2 componentes",
+    "modelo": "SVM"
+  },
+  {
+    "representacao": "PCA 4",
+    "arquivo": "avaliacao_pca_cv.csv",
+    "features": "PCA 4 componentes",
+    "modelo": "SVM"
+  },
+  {
+    "representacao": "4 fórmulas",
+    "arquivo": "avaliacao_formulas.csv",
+    "features": "só as 4 novas",
+    "modelo": "Regressão linear"
+  },
+  {
+    "representacao": "72 originais (referência)",
+    "arquivo": "avaliacao_formulas.csv",
+    "features": "72 originais",
+    "modelo": "SVM"
+  }
+]

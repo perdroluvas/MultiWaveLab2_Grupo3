@@ -1,397 +1,284 @@
-# Nova representação a partir das features originais
+# Grupo 3 — Feature Extraction em sinais PPG (All-PPGs)
 
-**Tema 5 do Grupo 3:** *Feature extraction — constructing a new feature
-representation from the original features.*
+**Atividade:** *Feature extraction — constructing a new feature representation from the original features.*  
+**Objetivo:** comparar representações construídas a partir das **72 características PPG** do MultiWaveLab2, observando seu efeito na predição da **glicose (`GLC`, mg/dL)** por diferentes regressores.
 
-Este documento é a fonte da verdade da apresentação: explica o que o
-MultiWaveLab já fazia, o que nós acrescentamos, os números que encontramos e
-como reproduzir tudo.
+Este diretório é uma extensão do MultiWaveLab2. **A extração primária dos sinais PPG já existe no projeto principal.** Aqui investigamos como representar de outra forma as 72 características numéricas extraídas. Foram mantidas as **quatro relações construídas por fórmula**, e adicionadas duas abordagens estatísticas: **PCA e PLS**. O conjunto original de 72 características é usado como **referência**, não como uma técnica nova de Feature Extraction.
 
----
+## 1. Por que houve modificações?
 
-## Resumo em 30 segundos
+### 1.1. Adequação ao dataset da atividade
 
-- O MultiWaveLab **já extrai** features do sinal de PPG (o sensor óptico de
-  pulso): cada participante vira uma linha com **72 números**.
-- Nós **não voltamos ao sinal**. A partir dessas 72 colunas, criamos **4
-  colunas novas** fazendo contas entre elas (divisões que tiram a unidade e o
-  efeito da frequência cardíaca).
-- As 4 colunas novas são fáceis de explicar e duas delas se correlacionam
-  com a glicose (*Ritmo do coração* e *Subida do pulso*).
-- Três das quatro reproduzem valores que o pipeline já calculava por outro
-  caminho, o que confirma que as contas estão certas. A *Largura do pulso* é
-  a única que traz informação nova.
-- Para prever a glicose, os modelos erram o mesmo ou um pouco menos com as
-  4 colunas novas do que com as 72 originais. O melhor (SVM com as 4 novas)
-  erra em média 53,8 mg/dL, contra 61,1 mg/dL de quem chuta sempre a média:
-  uma melhora pequena, que não basta para estimar a glicose.
+A análise inicial das quatro relações havia sido feita no **IEB-1**. A atividade adotou o **All-PPGs**, trabalhando apenas com **PPG**. Não é válido apresentar resultados do IEB-1 como resultados do All-PPGs: os registros e suas distribuições podem ser diferentes.
 
----
+**O que mudou:** os scripts passaram a utilizar a configuração `config_experiments/input_all_ppgs/exp0.json` e a trabalhar com os arquivos de características do All-PPGs. O histórico do IEB-1 foi **preservado** em `results/ieb1_legacy/`, separado das avaliações atuais.
 
-## Roteiro dos 3 slides (1 minuto cada)
+### 1.2. Separação de participantes na validação
 
-| slide | mensagem | o que mostrar |
-|---|---|---|
-| **1. O que já existia** | O MultiWaveLab transforma o sinal de pulso de cada pessoa em 72 números. Nossa tarefa começa depois disso: criar uma representação nova **a partir desses 72 números**, sem voltar ao sinal. | o diagrama da seção 1 |
-| **2. As 4 features novas** | Cada feature nova é uma divisão entre colunas originais. Dividir tira a unidade e o efeito da frequência cardíaca, e assim pessoas diferentes ficam comparáveis. | a tabela da seção 3.1, com o exemplo do participante hu_01 |
-| **3. O que encontramos** | O Ritmo do coração e a Subida do pulso se correlacionam com a glicose. Três features confirmam valores que já existiam (validação), e a Largura do pulso é nova. Com 4 colunas em vez de 72, os modelos erram o mesmo ou um pouco menos (melhor caso: 53,8 mg/dL contra 61,1 de chutar a média), mas nenhum estima bem a glicose. | `results/01_as_quatro_features.png` ou `results/02_mapa_correlacao.png` |
+O protocolo anterior incluía divisões como `KFold` e `RepeatedKFold`. Esses métodos não garantem que registros de uma mesma pessoa fiquem inteiramente em um único lado da divisão. Em dados com diversas medições por participante, isso pode tornar a avaliação excessivamente otimista.
 
----
+**O que mudou:** usamos **nested cross-validation** com `GroupKFold`, agrupando pela coluna `participant_id`:
 
-## 1. O que o repositório original já faz
+1. **5 folds externos** para estimar o erro em participantes não vistos no treinamento daquele fold;
+2. **3 folds internos** para ajustar hiperparâmetros, escolhendo por RMSE;
+3. **Imputação, padronização e PCA/PLS dentro do pipeline**, ajustadas apenas com os dados pertinentes ao treinamento de cada fold.
 
-O MultiWaveLab é o projeto de mestrado da Sofia P. Klautau (IEB-UFSC). Ele
-tenta estimar a **glicose no sangue** a partir de sinais fisiológicos não
-invasivos. No dataset IEB-1, que usamos aqui, o sinal é só o **PPG** (a onda
-de pulso medida por um sensor de luz na pele), gravado a 60 amostras por
-segundo, com uma medição de glicose por participante.
+A divisão oficial do All-PPGs tem a particularidade de incluir `ieb_01` nas listas de treino e teste. Na geração dos arquivos de representação, esse identificador é retirado **somente do treino derivado do Grupo 3**, preservando-se os arquivos oficiais e o teste. O teste independente **não é necessário nem foi exigido** para a comparação apresentada: os resultados deste README são de nested CV.
 
-O pipeline original faz tudo, do sinal ao modelo:
+### 1.3. Verificação de redundância das quatro relações
 
-```
-sinal PPG bruto
-   │  src/signal_processing/ppg.py           filtra o sinal e acha as batidas
-   ▼
-segmentos bons do sinal
-   │  src/segments/create_segment_files.py   recorta os trechos de boa qualidade
-   ▼
-72 features por segmento    ◄── EXTRAÇÃO (já existia)
-   │  src/features/extract_features_for_all_modalities.py
-   │  src/features/fusion_of_multimodality_features.py
-   ▼
-features0.csv  (92 participantes × 72 features + glicose)
-   │                                         ┌──────────────────────────────┐
-   ├────────────────────────────────────────►│ NOSSA PARTE: new_features/   │
-   │                                         │ 72 colunas → +4 colunas novas│
-   │                                         └──────────────────────────────┘
-   │  src/machinelearning/train_test_splits.py   separa treino e teste
-   │  src/features/feature_selection.py          escolhe as melhores features
-   ▼  src/machinelearning/regression_evaluation.py  treina modelos e mede o erro
-estimativa de glicose
+Construir uma coluna por fórmula não garante que ela represente informação muito diferente das colunas originais. Recalculamos, no treino do **All-PPGs**, a correlação de Spearman entre cada nova característica e sua característica original mais correlacionada:
+
+| Nova característica | Original mais correlacionada | ρ de Spearman |
+|---|---|---:|
+| `repr_ppg_beat_rate_hz` | `ppg_p1_hr_mean` | 0,999 |
+| `repr_ppg_b2_width_over_period` | `ppg_i6_IMF_1_mean` | 0,599 |
+| `repr_ppg_b2_crest_time_over_period` | `ppg_b2_Tr_norm_median` | 0,994 |
+| `repr_ppg_p1_rr_cv` | `ppg_p1_peak_interval_std` | 0,964 |
+
+**Fonte:** `results/redundancia.csv`, enviado junto com as avaliações do All-PPGs. Três relações têm correlação muito alta com alguma característica original, sugerindo redundância. **Isso não torna as fórmulas incorretas**, mas é uma razão para estudar representações alternativas. Correlação não mede, por si só, todo o valor preditivo de uma variável.
+
+### 1.4. Extensão da comparação
+
+Incluímos **PCA** e **PLS**, dois métodos consolidados que produzem novos componentes, para comparar uma abordagem manual, uma não supervisionada e uma supervisionada. A seleção de seis colunas originais, por exemplo, seria *feature selection*, não *feature extraction*, e por isso **não integra as candidatas**.
+
+## 2. Visão geral do fluxo
+
+```text
+Sinais PPG do All-PPGs
+    ↓  MultiWaveLab2: extração inicial
+72 características originais (ppg_*) + alvo glicose (GLC)
+    ├── Quatro fórmulas → 4 novas características (repr_*)
+    ├── PCA            → 4, 8 ou 12 componentes
+    ├── PLS            → 2, 4, 8 ou 12 componentes
+    └── 72 originais   → referência, sem transformação de extração adicional
+    ↓
+Regressores: Regressão linear | KNN | Árvore de decisão | SVM
+    ↓
+Nested CV agrupada por participante (5 externos × 3 internos)
+    ↓
+MAE / RMSE e dispersão entre folds
+    ↓
+CSV de comparação + gráficos gerados automaticamente por script
 ```
 
-| | repositório original | o que nós acrescentamos |
+As quatro fórmulas podem ser utilizadas **isoladamente** ou **acrescentadas** às 72 originais, e o script de avaliação contempla as duas possibilidades. Os resultados destacados abaixo usam **somente as quatro novas**. PCA e PLS utilizam as 72 originais como entrada e produzem componentes novos como saída.
+
+## 3. Lógica de cada método
+
+### 3.1. Quatro relações via fórmula — Feature Extraction manual
+
+São transformações determinísticas definidas em `feature_representation.py`. Não aprendem coeficientes a partir da glicose e permanecem interpretáveis. As quatro colunas geradas recebem o prefixo `repr_`:
+
+| Característica derivada | Cálculo | Ideia |
 |---|---|---|
-| **Entrada** | sinal PPG bruto | a tabela de 72 features que o original produz |
-| **Saída** | 72 features por participante, modelos de regressão | 4 colunas novas (`repr_*`), figuras e tabelas de análise |
-| **Onde fica** | `src/` | `new_features/` (o código original não foi alterado) |
-| **Como liga** | grava `features0.csv` | lê `features0.csv` e grava `features0_repr.csv`, que o resto do pipeline pode usar no lugar |
+| `repr_ppg_beat_rate_hz` | `ppg_b2_N_BEATS × fs / duration` | Converter quantidade de batimentos em batimentos por segundo. `duration` é expressa em amostras, e `fs` é a taxa de amostragem. |
+| `repr_ppg_b2_width_over_period` | `ppg_b2_width_median / ppg_b2_T_median` | Expressar a largura mediana do pulso como fração do período cardíaco. |
+| `repr_ppg_b2_crest_time_over_period` | `ppg_b2_Tr_median / ppg_b2_T_median` | Expressar o tempo até o pico como fração do período cardíaco. |
+| `repr_ppg_p1_rr_cv` | `ppg_p1_peak_interval_std × ppg_p1_hr_mean / 60` | Aproximar a variabilidade relativa dos intervalos entre picos. |
 
-### 1.1 Como a extração funciona no código
+**Atenções técnicas:** a primeira é uma **frequência em Hz**, não uma razão adimensional. A quarta é uma **aproximação** de coeficiente de variação: sua fórmula depende de substituir a média do intervalo pelo inverso da frequência cardíaca média, o que não é uma igualdade exata em todas as situações. Nas divisões com denominadores inválidos, a implementação produz valores ausentes tratados na etapa de modelagem.
 
-Para cada segmento, o código carrega o sinal, recorta o trecho e chama o
-extrator da modalidade
-(**`src/features/extract_features_for_all_modalities.py:177`**):
+**Vantagens:** interpretação direta e baixo número de características. **Limitações:** escolha heurística das relações e redundância observada em três delas. É uma tentativa legítima de Feature Extraction, mas não há, neste experimento, comprovação de uma relação fisiológica causal com a glicose.
 
-```python
-def extract_features_for_segment(row, fs_dict, datasetConfig):
-    signal = load_signal(path)                            # lê o sinal do arquivo
-    signal = signal[start_sample:start_sample+duration]   # recorta o segmento
+**Arquivos:** `feature_representation.py` (regras), `run_feature_representation.py` (aplicação aos CSVs), `evaluate_formulas.py` (avaliação e redundância), `visualize_representation.py` (gráficos exploratórios das fórmulas).
 
-    if modality == "ppg":
-        features = extract_ppg_features(datasetConfig, signal, fs_dict["ppg"])
-    return features
-```
+### 3.2. PCA — Principal Component Analysis
 
-O extrator de PPG (**`src/signal_processing/ppg.py:1035`**) usa a biblioteca
-NeuroKit2 para achar as batidas e calcula as features em cinco grupos:
+O PCA constrói componentes como **combinações lineares das variáveis originais**, procurando direções que preservem a maior variância possível dos dados de entrada. É **não supervisionado**: durante a criação dos componentes, utiliza as características PPG, **não** os valores de glicose.
 
-```python
-signals, info = nk.ppg_process(ppg, sampling_rate=fs)   # acha os picos
-peaks = np.sort(info["PPG_Peaks"])
+1. O pipeline preenche valores ausentes e padroniza as 72 entradas.
+2. Ajusta o PCA **no treino do fold** e transforma os registros em **4, 8 ou 12 componentes**.
+3. Um regressor aprende a prever glicose usando esses componentes.
+4. Os dados de validação passam pelo mesmo PCA ajustado anteriormente, sem reajuste.
 
-features1_peaks    = extract_features_group1_peaks(...)     # p1: frequência, amplitude
-features2_beats    = extract_features_group2_beats(...)     # b2: forma de cada batida
-features3_spectral = extract_features_group3_spectral(...)  # s3: espectro de frequências
-features4_hrv      = extract_features_group4_prv(...)       # h4: variabilidade do ritmo
-features6_imf      = extract_features_group6_imf(...)       # i6: decomposição do sinal (EMD)
-```
+**Vantagem:** método matematicamente definido, reproduzível e compacto. **Limitação:** preservar a variância das características não garante preservar a informação mais útil para prever glicose.
 
-Cada grupo vira colunas com um prefixo:
+**Arquivo:** `evaluate_pca.py`.
 
-| grupo | exemplo de coluna | o que mede |
-|---|---|---|
-| `p1` | `ppg_p1_hr_mean` | frequência cardíaca média (batimentos por minuto) |
-| `b2` | `ppg_b2_T_median` | duração típica de um batimento (s) |
-| `b2` | `ppg_b2_width_median` | tempo em que a onda fica acima da metade da altura (s) |
-| `b2` | `ppg_b2_Tr_median` | tempo do início do batimento até o pico (s) |
-| `s3` | `ppg_s3_MAX_POWER_1st` | força da frequência principal do sinal |
-| `h4` | `ppg_h4_PRV_HRV_RMSSD` | variação entre batimentos seguidos |
-| `i6` | `ppg_i6_IMF_1_dom_freq` | frequência dominante da 1ª componente do sinal |
+### 3.3. PLS — Partial Least Squares
 
-Depois, o projeto limpa e preenche valores faltantes
-(`src/features/clean_features_dataframe.py`) e grava o CSV. O resultado é
-uma linha por segmento com 72 features e metadados (participante, sessão,
-qualidade do sinal e a glicose, na coluna `GLC`). No IEB-1 há **um segmento
-por participante**, ou seja, 92 linhas.
+O PLS também produz **componentes latentes**, mas leva em conta a relação entre as características PPG (**`X`**) e a glicose (**`y`**) ao ajustar a transformação. Portanto, é **supervisionado**, ainda que a tarefa seja **regressão** e não classificação: a glicose contínua é o rótulo.
 
----
+1. O pipeline preenche valores ausentes e padroniza as 72 entradas.
+2. O PLS é ajustado com **`X` e `y` somente no treino do fold**, construindo **2, 4, 8 ou 12 componentes**.
+3. O regressor aprende a prever glicose com os componentes PLS.
+4. Na validação ou em uma predição futura, o transformador recebe **apenas `X`**. O valor de glicose do exemplo não é fornecido para transformá-lo.
 
-## 2. A regra do nosso trabalho
+O código implementa `PLSFeatureExtractor` como transformador intermediário do pipeline do scikit-learn, retornando somente os componentes de `X`.
 
-> **Usar somente as 72 colunas originais. Não voltar ao sinal.**
+**Vantagem:** orienta a representação para o alvo do problema. **Limitação:** é particularmente importante ajustar o PLS **dentro de cada fold** para evitar vazamento da informação do alvo.
 
-"Construir uma nova representação" aqui quer dizer criar colunas novas que
-são **contas entre colunas que já existem**. Escolhemos **divisões**, porque
-dividir duas grandezas da mesma unidade gera um número sem unidade, que
-permite comparar pessoas e gravações diferentes.
+**Arquivo:** `evaluate_pls.py`.
 
-As colunas novas recebem o prefixo `repr_`, ficam ao lado das 72 originais e
-nunca sobrescrevem metadados (`participant_id`, `GLC` etc.).
+### 3.4. Comparação conceitual
 
----
-
-## 3. As quatro features novas
-
-### 3.1 Um exemplo real: participante `hu_01` (glicose = 181 mg/dL)
-
-Valores originais usados:
-
-| coluna original | valor | o que é |
-|---|---|---|
-| `ppg_b2_N_BEATS` | 353 | número de batimentos no segmento |
-| `duration` | 18 271 amostras | tamanho do segmento (18 271 ÷ 60 = 304,5 s) |
-| `ppg_b2_T_median` | 0,867 s | duração típica de um batimento |
-| `ppg_b2_width_median` | 0,283 s | tempo com a onda acima da metade da altura |
-| `ppg_b2_Tr_median` | 0,250 s | tempo do início até o pico |
-| `ppg_p1_peak_interval_std` | 0,0151 s | desvio-padrão do intervalo entre batimentos |
-| `ppg_p1_hr_mean` | 69,76 bpm | frequência cardíaca média |
-
-As quatro features novas:
-
-| # | nome | o que significa | conta | resultado |
+| Critério | Quatro fórmulas | PCA | PLS | 72 originais |
 |---|---|---|---|---|
-| 1 | **Ritmo do coração** | batimentos por segundo | 353 ÷ (18 271 ÷ 60) | 1,159 (= 69,5 por minuto) |
-| 2 | **Largura do pulso** | fração do batimento com a onda acima da metade da altura | 0,283 ÷ 0,867 | 0,327 |
-| 3 | **Subida do pulso** | fração do batimento até a onda chegar ao pico | 0,250 ÷ 0,867 | 0,288 |
-| 4 | **Irregularidade do ritmo** | quanto o intervalo entre batimentos varia, em relação ao intervalo médio | 0,0151 ÷ (60 ÷ 69,76) | 0,0175 (1,75%) |
+| Cria representação nova | Sim | Sim | Sim | Não: referência |
+| Usa a glicose na criação | Não | Não | **Sim, no treino** | Não |
+| Quantidade de dimensões | 4 | 4 / 8 / 12 | 2 / 4 / 8 / 12 | 72 |
+| Facilidade de interpretar cada dimensão | Alta | Menor | Menor | Depende da característica original |
+| Principal ponto de atenção | Redundância | Variância não equivale a poder preditivo | Ajuste supervisionado sem vazamento | Dimensionalidade / redundância |
 
-Nome das colunas no CSV: `repr_ppg_beat_rate_hz`,
-`repr_ppg_b2_width_over_period`, `repr_ppg_b2_crest_time_over_period` e
-`repr_ppg_p1_rr_cv`.
+## 4. Como os resultados foram medidos
 
-### 3.2 Por que essas quatro
+- **MAE (mg/dL):** média do erro absoluto. Menor é melhor.
+- **RMSE (mg/dL):** raiz do erro quadrático médio. Penaliza mais fortemente erros grandes. Menor é melhor.
+- **Nested CV:** cinco folds externos com `GroupKFold`, três internos para hiperparâmetros, escolhidos por RMSE. A tabela apresenta **médias dos cinco folds externos**; elas não são métricas do teste independente.
+- **Regressores avaliados:** regressão linear, KNN, árvore de decisão e SVM. O Dummy (média) serve como referência de controle.
+- **Dados de origem:** `avaliacao_formulas.csv`, `avaliacao_pca_cv.csv`, `avaliacao_pls_cv.csv`; o arquivo histórico do IEB-1 **não participa** da comparação.
 
-| feature | o que ela captura | por que a divisão ajuda |
-|---|---|---|
-| **Ritmo do coração** | frequência | o número de batimentos sozinho depende do tamanho da gravação; dividindo pela duração, vira uma taxa comparável |
-| **Largura do pulso** | forma da onda | em segundos, a largura cresce só porque o coração bate mais devagar; como fração do batimento, mede a forma, e não o ritmo |
-| **Subida do pulso** | forma da onda | idem; o tempo de subida até o pico é associado na literatura à rigidez das artérias |
-| **Irregularidade do ritmo** | variabilidade | o desvio-padrão sozinho é maior em quem tem batimentos mais lentos; dividindo pelo intervalo médio (coeficiente de variação), fica comparável |
+## 5. Comparação principal: quatro configurações selecionadas
 
-Juntas, elas cobrem **frequência, forma (duas) e variabilidade**.
+Conforme o recorte definido para a apresentação, os gráficos principais mostram **uma combinação destacada de cada família**: PLS, PCA, quatro fórmulas e 72 originais. A tabela e as imagens são **geradas por `visualize_cv_results.py` a partir dos CSVs**; os valores não ficam codificados dentro das figuras.
 
-### 3.3 Números nos 92 participantes
+| Representação | Modelo | MAE ↓ (mg/dL) | RMSE ↓ (mg/dL) | Fonte |
+|---|---|---:|---:|---|
+| **PLS 2** | **SVM** | **42,43** | 66,80 | `avaliacao_pls_cv.csv` |
+| PCA 4 | SVM | 42,73 | 67,50 | `avaliacao_pca_cv.csv` |
+| 4 fórmulas | Regressão linear | 49,00 | **66,70** | `avaliacao_formulas.csv` |
+| 72 originais (referência) | SVM | 43,70 | 68,00 | `avaliacao_formulas.csv` |
 
-| feature | média | desvio | mín | máx | correlação com a glicose (Spearman) |
-|---|---|---|---|---|---|
-| **Ritmo do coração** | 1,195 | 0,195 | 0,779 | 1,734 | +0,33 (p = 0,001) |
-| **Largura do pulso** | 0,379 | 0,052 | 0,295 | 0,529 | −0,19 (p = 0,070, não significativa) |
-| **Subida do pulso** | 0,314 | 0,040 | 0,243 | 0,482 | +0,23 (p = 0,027) |
-| **Irregularidade do ritmo** | 0,084 | 0,064 | 0,018 | 0,328 | −0,17 (p = 0,103, não significativa) |
+![MAE das quatro configurações selecionadas](results/01_comparacao_mae.png)
 
-Como ler: a correlação de Spearman vai de −1 a +1 (0 = nenhuma relação). Um
-valor de +0,33 é uma relação **fraca a moderada**: pessoas com ritmo mais
-rápido tendem a ter glicose mais alta, mas com muita dispersão (veja a
-figura `01_as_quatro_features.png`). Com 92 pessoas, |ρ| precisa passar de
-~0,21 para ser significativo (p < 0,05).
+![RMSE das quatro configurações selecionadas](results/02_comparacao_rmse.png)
 
----
+### Como interpretar esses destaques
 
-## 4. O que encontramos
+**PLS 2 + SVM** apresenta o menor **MAE desta tabela**, enquanto **quatro fórmulas + regressão linear** apresenta o menor **RMSE desta tabela**, por uma margem de apenas 0,10 mg/dL sobre PLS 2 + SVM. As diferenças pequenas não comprovam superioridade estatística, sobretudo considerando variação entre folds: por exemplo, para PLS 2 + SVM, o desvio-padrão do MAE foi **10,07 mg/dL** e o do RMSE foi **18,84 mg/dL**.
 
-### 4.1 As features novas são novas mesmo?
+**Importante sobre a expressão “melhores resultados”:** estas são as **quatro combinações da tabela de apresentação**, não necessariamente as vencedoras em todas as métricas dentre todas as linhas dos CSVs. Por exemplo, na família das quatro fórmulas, a SVM teve **MAE 48,4** (menor que 49,0 da regressão linear), mas **RMSE 74,2** (maior que 66,7). Em PLS 2, o KNN teve **RMSE 66,662**, ligeiramente inferior ao da SVM, mas **MAE 49,330**, consideravelmente maior. A seleção do recorte procura permitir a leitura conjunta de MAE e RMSE, e **não deve ser apresentada como uma ordenação matemática por uma única métrica**.
 
-Para cada feature nova, procuramos a coluna original que mais se parece com
-ela (correlação de Spearman entre as duas; ±1 = praticamente a mesma
-informação):
+Os resultados da avaliação por fórmulas e das 72 características aparecem com **uma casa decimal** no CSV original `avaliacao_formulas.csv`. Os valores exibidos com duas casas na tabela não significam que esse CSV tenha precisão original adicional.
 
-| feature nova | coluna original mais parecida | ρ | leitura |
-|---|---|---|---|
-| **Irregularidade do ritmo** | `ppg_h4_PRV_HRV_CVNN` | +1,00 | é a mesma medida, calculada por outro caminho |
-| **Ritmo do coração** | `ppg_h4_PRV_HRV_MeanNN` | −0,999 | é o inverso do intervalo médio entre batimentos |
-| **Subida do pulso** | `ppg_b2_Tr_norm_median` | +0,96 | quase a mesma coisa (o original divide batimento a batimento e tira a mediana; nós dividimos as medianas) |
-| **Largura do pulso** | `ppg_s3_E2_norm` | −0,49 | **informação nova**: nenhuma coluna original se parece muito com ela |
+### Atualização automática da tabela e dos gráficos
 
-Três das quatro reproduzem valores que o pipeline já calculava (as duas
-primeiras vêm do NeuroKit2, a terceira do próprio `ppg.py`). Isso não é um
-defeito: **confirma que nossas contas estão certas**, porque chegamos ao
-mesmo resultado partindo de outras colunas.
+A seleção exata de quatro linhas está em **`config/comparacao_destaques.json`**. O script:
 
-Também vale notar o que a divisão faz com a correlação: a largura em
-segundos tem ρ = −0,46 com a glicose, e a Largura do pulso cai para −0,19.
-Ou seja, boa parte da relação da largura com a glicose vinha da frequência
-cardíaca, e a divisão separa os dois efeitos.
+1. Lê os **três CSVs atuais** da pasta `results/`.
+2. Procura a linha com as colunas **`features`** e **`modelo`** especificadas no JSON, sem misturar IEB-1.
+3. Recria `results/comparacao_representacoes.csv`, `results/01_comparacao_mae.png` e `results/02_comparacao_rmse.png`.
+4. Interrompe a execução com erro explícito se faltar um CSV ou alguma combinação, em vez de usar valores antigos ou inventados.
 
-### 4.2 Elas ajudam a prever a glicose?
-
-**Como medimos.** Usamos o mesmo método de avaliação do repositório original
-(`src/machinelearning/regression_evaluation.py`), com os modelos vistos na
-disciplina: **regressão linear, KNN, árvore de decisão** (a de profundidade 1
-é o *decision stump*) e **SVM**. O passo a passo:
-
-1. Os 92 participantes são divididos em 5 partes. O modelo treina com 4
-   partes e é testado na 5ª, que ele nunca viu.
-2. Dentro das 4 partes de treino, uma segunda divisão (em 3) escolhe os
-   ajustes de cada modelo, como o número de vizinhos do KNN ou a
-   profundidade da árvore. Assim, a parte de teste não influencia nenhuma
-   escolha.
-3. As colunas são padronizadas (média 0, desvio 1) antes de entrar no
-   modelo, como no original.
-4. A divisão em 5 partes é repetida 20 vezes com sorteios diferentes (100
-   testes no total), e todos os conjuntos de features usam os mesmos
-   sorteios. A diferença para o original é só essa repetição: o original faz
-   a divisão uma vez e guarda 6 participantes para um teste final, o que é
-   pouco para comparar conjuntos de features.
-
-A medida é o **erro médio absoluto (MAE)**: em média, quantos mg/dL a
-previsão erra. A referência é **chutar sempre a média** da glicose do treino,
-que erra **61,1 mg/dL**. Para comparar, a glicose dos participantes vai de 65
-a 400 mg/dL (mediana 122).
-
-| features usadas | regressão linear | KNN | árvore de decisão | SVM |
-|---|---|---|---|---|
-| 72 originais | 528,6 | 58,8 | 66,1 | 56,9 |
-| 72 originais + 4 novas | 1442,9 | 58,7 | 65,9 | 56,5 |
-| só as 6 colunas originais que entram nas contas | 59,1 | 59,5 | 61,1 | 55,6 |
-| **só as 4 novas** | **57,0** | 58,8 | 62,1 | **53,8** |
-
-Erro em mg/dL; quanto menor, melhor. Chutar a média erra 61,1.
-
-O que isso mostra:
-
-- **A regressão linear não funciona com as 72 colunas.** Cada parte de
-  treino tem 73 ou 74 pessoas e o modelo recebe 72 colunas, ou seja, quase uma
-  coluna por pessoa. Ele decora o treino e erra 529 mg/dL em média no teste.
-  Com as 4 colunas novas, o mesmo modelo erra 57,0 mg/dL, 4,1 a menos que
-  chutar a média.
-- **O melhor resultado é o SVM com as 4 novas:** erra 53,8 mg/dL, 7,4 a
-  menos que chutar a média, e ganha da média em 84 dos 100 testes. Com as 72
-  originais, o SVM erra 56,9.
-- **Somar as 4 novas às 72 não muda nada** nos modelos que funcionam (KNN,
-  árvore e SVM variam no máximo 0,4 mg/dL).
-- **Boa parte do ganho vem de usar poucas colunas.** As 6 colunas originais
-  que entram nas contas, sem fazer as divisões, ficam perto das 4 novas (no
-  SVM, 55,6 contra 53,8). A diferença de 1,8 mg/dL é pequena perto da
-  variação de um teste para outro (~11 a 15 mg/dL).
-- **A árvore de decisão é o pior modelo** e, com as 72 colunas, erra mais
-  que chutar a média (66,1).
-
-**Conclusão:** com 4 colunas em vez de 72, os modelos erram o mesmo ou um
-pouco menos (a regressão linear só funciona com as 4). Mesmo o melhor
-modelo ainda erra cerca de 54 mg/dL, apenas 7,4 mg/dL a menos que chutar a
-média: com 92 participantes, nenhuma combinação estima bem a glicose.
-
----
-
-## 5. Como rodar
-
-### 5.1 Preparar o ambiente (uma vez)
-
-O projeto precisa de **Python 3.10** (com o 3.14, o `numpy==2.2.6` não
-instala). Usamos o `uv` instalado **dentro do projeto**, sem nada global. Da
-raiz do repositório:
+**Para atualizar:** substitua os três CSVs de avaliação pelos produzidos na nova rodada e execute:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$PWD/.uv/bin" UV_NO_MODIFY_PATH=1 sh
-UV_PYTHON_INSTALL_DIR="$PWD/.uv/python" .uv/bin/uv venv --seed --python 3.10.13 .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install pyPPG --no-deps
+python new_features/visualize_cv_results.py
 ```
 
-Para desfazer tudo: `rm -rf .uv .venv`.
+O código usará os valores mais recentes. Se quiser mudar **quais combinações** são destacadas, edite apenas `config/comparacao_destaques.json`. **O README contém uma tabela estática como registro desta execução**: se os resultados mudarem, atualize também os números do texto para não haver divergência em relação às imagens e ao CSV regenerados.
 
-### 5.2 Gerar as features originais (só se ainda não existirem)
+Não há gráfico PLS isolado entre as **figuras principais**, porque a comparação solicitada é **entre as quatro representações**. As tabelas completas de todos os modelos continuam arquivadas nos CSVs para consulta e auditoria.
 
-A partir da pasta `src`, com o `.venv` ativo:
+## 6. Reproduzir os experimentos — comandos completos
+
+### 6.1. Requisitos e diretórios
+
+Ter o repositório **MultiWaveLab2** com dependências Python instaladas e o conjunto **All-PPGs/PPG** preparado. A pasta `new_features/` deve ficar na **raiz do repositório**, ao lado de `src/` e `config_experiments/`. O processamento original do MultiWaveLab2 deve ter gerado os CSVs de características do treino e do teste (`features0_train.csv` e `features0_test.csv`), conforme a configuração `exp0.json`. **Se esses CSVs já existem, não é necessário reextrair os sinais.**
+
+Os comandos de execução são apresentados para **Bash/Linux/macOS**. Caso o ambiente não reconheça `PYTHONPATH=.`, configure o caminho dos módulos de `src` conforme o sistema operacional.
+
+### 6.2. Testes automatizados (raiz do MultiWaveLab2)
+
+```bash
+python -m unittest discover -s new_features/tests -v
+```
+
+### 6.3. Gerar as quatro relações por fórmula (entrar em `src/`)
 
 ```bash
 cd src
-PYTHONPATH=. python signal_processing/ppg.py ../config_experiments/input_ieb1/exp0.json
-PYTHONPATH=. python segments/create_segment_files.py ../config_experiments/input_ieb1/exp0.json
-PYTHONPATH=. python features/extract_features_for_all_modalities.py ../config_experiments/input_ieb1/exp0.json
-PYTHONPATH=. python features/fusion_of_multimodality_features.py ../config_experiments/input_ieb1/exp0.json
-PYTHONPATH=. python machinelearning/train_test_splits.py ../config_experiments/input_ieb1/exp0.json
+PYTHONPATH=. python ../new_features/run_feature_representation.py \
+    ../config_experiments/input_all_ppgs/exp0.json \
+    --source train_test --repr ratio
 ```
 
-Isso grava `features0.csv`, `features0_train.csv` e `features0_test.csv` em
-`../../multiwavelab_outputs/output_ieb1/features/`. (O
-`src/run_scripts/run_all_pipelines.py` faz a mesma sequência, mas usa
-caminhos no formato do Windows.)
+Produz `features0_train_repr.csv` e `features0_test_repr.csv` no diretório de características configurado. A representação contém as 72 características originais e as quatro colunas derivadas; a avaliação pode selecionar só as quatro colunas. As listas oficiais não são modificadas.
 
-### 5.3 Construir as quatro features novas
-
-Ainda em `src`:
+### 6.4. Avaliar quatro fórmulas e 72 originais (ainda em `src/`)
 
 ```bash
-# arquivo com todos os participantes
-PYTHONPATH=. python ../new_features/run_feature_representation.py \
-    ../config_experiments/input_ieb1/exp0.json --repr ratio
-
-# divisões de treino/teste
-PYTHONPATH=. python ../new_features/run_feature_representation.py \
-    ../config_experiments/input_ieb1/exp0.json --source train_test --repr ratio
+PYTHONPATH=. python ../new_features/evaluate_formulas.py \
+    ../config_experiments/input_all_ppgs/exp0.json
 ```
 
-| opção | efeito |
-|---|---|
-| `--repr ratio` | a representação com as 4 features (é a única) |
-| `--spec arquivo.json` | lê a configuração de um arquivo (exemplo em `config/feature_representation.json`) |
-| `--source fused\|train_test` | aplica no arquivo completo ou nas divisões de treino/teste |
-| `--no-original` | grava só as colunas novas e os metadados, sem as 72 originais |
-| `--describe` | só descreve as 72 features originais, sem gerar nada |
+Produz `new_features/results/avaliacao_formulas.csv` e `redundancia.csv`. O script avalia **72 originais**, **72 originais + quatro novas** e **somente as quatro novas**, com os regressores citados. Não passa `--evaluate-test`: o teste separado não é necessário para a comparação.
 
-### 5.4 Gerar as figuras e tabelas
+### 6.5. Avaliar PCA (ainda em `src/`)
 
 ```bash
+PYTHONPATH=. python ../new_features/evaluate_pca.py \
+    ../config_experiments/input_all_ppgs/exp0.json
+```
+
+Produz `new_features/results/avaliacao_pca_cv.csv` com PCA 4, 8 e 12 componentes e todos os regressores.
+
+### 6.6. Avaliar PLS (ainda em `src/`)
+
+```bash
+PYTHONPATH=. python ../new_features/evaluate_pls.py \
+    ../config_experiments/input_all_ppgs/exp0.json
+```
+
+Produz `new_features/results/avaliacao_pls_cv.csv` com PLS 2, 4, 8 e 12 componentes e todos os regressores. **Não usar `--quick`** quando a intenção for refazer a avaliação completa.
+
+### 6.7. Gerar os gráficos principais (voltar à raiz)
+
+```bash
+cd ..
+python new_features/visualize_cv_results.py
+```
+
+Gera novamente os **dois gráficos com as quatro configurações selecionadas** e o CSV-resumo. Este comando precisa apenas dos três CSVs agregados, sem o dataset nem os sinais brutos.
+
+### 6.8. Gráficos exploratórios das quatro fórmulas no All-PPGs (opcional)
+
+Os gráficos de dispersão com glicose e mapa de correlação são **diferentes** dos gráficos de comparação de MAE/RMSE. Eles exigem o arquivo de características por registro do All-PPGs, gerado na etapa 6.3. Para produzi-los:
+
+```bash
+cd src
 PYTHONPATH=. python ../new_features/visualize_representation.py \
-    ../config_experiments/input_ieb1/exp0.json
+    ../config_experiments/input_all_ppgs/exp0.json
 ```
 
-As figuras são copiadas para `new_features/results/`:
+Gera `results/01_as_quatro_features.png` e `results/02_mapa_correlacao.png` para o All-PPGs. **Não confundir com as imagens históricas em `results/ieb1_legacy/`.**
 
-| figura | o que mostra |
-|---|---|
-| `01_as_quatro_features.png` | cada feature nova contra a glicose (um ponto por pessoa), com a correlação e a reta de tendência |
-| `02_mapa_correlacao.png` | mapa de cores com a correlação entre as 4 features e a glicose |
+## 7. Arquivos e rastreabilidade
 
-### 5.5 Reproduzir a seção 4
-
-Da raiz do repositório (usa o `results/features0_repr.csv` já pronto):
-
-```bash
-python new_features/evaluate_representation.py
-```
-
-Leva de 1 a 2 minutos e grava `results/redundancia.csv` (seção 4.1) e
-`results/avaliacao_modelos.csv` (seção 4.2).
-
-### 5.6 Arquivos de resultado
-
-| arquivo | conteúdo |
-|---|---|
-| `results/features0_repr.csv` | as 72 features originais + as 4 colunas novas (92 linhas) |
-| `results/dados_por_participante.csv` | participante, glicose e as 4 features novas |
-| `results/resumo_estatistico.csv` | média, desvio, mín, máx e correlação com a glicose (seção 3.3) |
-| `results/redundancia.csv` | coluna original mais parecida com cada feature nova (seção 4.1) |
-| `results/avaliacao_modelos.csv` | erro dos modelos com cada conjunto de features (seção 4.2) |
-| `results/feature_representation_report.json` | o que foi aplicado e quais colunas foram criadas |
-| `results/01_as_quatro_features.png`, `results/02_mapa_correlacao.png` | as duas figuras |
-
----
-
-## Arquivos deste módulo
-
-```
+```text
 new_features/
-├── README.md                       este documento
-├── _bootstrap.py                   deixa a pasta src/ importável nos scripts
-├── feature_representation.py       as regras que criam as 4 colunas novas
-├── run_feature_representation.py   lê features0.csv e grava features0_repr.csv
-├── visualize_representation.py     gera as figuras e as tabelas da seção 3
-├── evaluate_representation.py      gera as tabelas da seção 4
-├── results/                        resultados prontos (CSVs e figuras)
-└── config/
-    └── feature_representation.json  exemplo de configuração
+├── README.md                         documentação do experimento
+├── feature_representation.py         fórmulas manuais
+├── run_feature_representation.py     aplicação das fórmulas aos dados
+├── evaluate_formulas.py              nested CV das fórmulas e das 72 originais
+├── evaluate_pca.py                   nested CV de PCA 4 / 8 / 12
+├── evaluate_pls.py                   nested CV de PLS 2 / 4 / 8 / 12
+├── split_integrity.py                separação por participante
+├── visualize_representation.py       gráficos exploratórios das fórmulas
+├── visualize_cv_results.py           tabela e gráficos da comparação selecionada
+├── config/
+│   ├── feature_representation.json
+│   └── comparacao_destaques.json      quatro linhas exibidas nos gráficos
+├── tests/                            testes automatizados
+└── results/
+    ├── README.md                     descrição das fontes
+    ├── avaliacao_formulas.csv         4 fórmulas, 72 originais e 72 + 4
+    ├── avaliacao_pca_cv.csv          experimentos com PCA
+    ├── avaliacao_pls_cv.csv          experimentos com PLS
+    ├── redundancia.csv               correlações no treino do All-PPGs
+    ├── comparacao_representacoes.csv  quatro linhas selecionadas dos CSVs
+    ├── 01_comparacao_mae.png          MAE das quatro combinações
+    ├── 02_comparacao_rmse.png         RMSE das quatro combinações
+    └── ieb1_legacy/                  histórico preservado, não usado na comparação
 ```
+
+`avaliacao_formulas.csv` e os arquivos PCA/PLS contêm **todas as configurações avaliadas**, mesmo que só quatro linhas sejam destacadas na apresentação. Essa separação evita descartar informação experimental para simplificar os gráficos.
+
+## 8. Conclusão e limitações
+
+A principal mudança foi **adequar o trabalho ao All-PPGs/PPG e avaliar por participante**, mantendo as quatro fórmulas e acrescentando PCA e PLS para comparação de técnicas de Feature Extraction. A redundância encontrada nas fórmulas motiva o estudo das alternativas, mas não invalida seu uso.
+
+**Na tabela de apresentação**, PLS com dois componentes + SVM apresentou o **menor MAE** (42,43 mg/dL); as quatro fórmulas + regressão linear apresentaram o **menor RMSE** (66,70 mg/dL), praticamente igual ao PLS 2 + SVM (66,80 mg/dL). **Os resultados não demonstram superioridade estatística nem precisão clínica.** São médias de validação cruzada, e o desvio entre folds é relevante.
+
+Os arquivos de saída incluídos neste pacote fornecem as linhas utilizadas nos gráficos. O script `visualize_cv_results.py` e o JSON de destaques permitem **regerar a comparação sem solicitar novas imagens manualmente**. A pasta histórica IEB-1 foi preservada, mas seus resultados não são misturados aos do All-PPGs.

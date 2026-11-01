@@ -10,7 +10,7 @@ Usage
 From the ``src`` folder of the repository::
 
     python ../new_features/run_feature_representation.py \
-        ../config_experiments/input_ieb1/exp0.json
+        ../config_experiments/input_all_ppgs/exp0.json
 
 Options::
 
@@ -47,8 +47,10 @@ from _bootstrap import ensure_import_paths
 ensure_import_paths()
 
 from datasets_util.naming_conventions import DatasetConfig
+from split_integrity import resolve_official_overlap
 from feature_representation import (
     DEFAULT_SPEC,
+    RATIO_RULES,
     KEEP_ORIGINAL_KEY,
     REPRESENTATIONS_KEY,
     TARGET_COLUMN,
@@ -184,12 +186,30 @@ def run_train_test(
     print(f"Reading test features from: {test_file}")
     df_test = pd.read_csv(test_file)
 
+    if "participant_id" not in df_train.columns or "participant_id" not in df_test.columns:
+        raise ValueError("Treino e teste precisam da coluna participant_id.")
+    if df_train["participant_id"].isna().any() or df_test["participant_id"].isna().any():
+        raise ValueError("Há participant_id ausente em treino ou teste.")
+    df_train, removed_ids, removed_rows = resolve_official_overlap(df_train, df_test)
+    # Do not suppress other unexpected overlaps: test and development must be disjoint.
+    repeated = set(df_train["participant_id"]) & set(df_test["participant_id"])
+    if repeated:
+        raise ValueError(
+            f"Participantes presentes no treino e no teste: {sorted(repeated)}"
+        )
+
     result_train, report = apply_representation(
         df_train, spec, sampling_rate=sampling_rate
     )
     result_test, _ = apply_representation(
         df_test, spec, sampling_rate=sampling_rate
     )
+
+    expected_columns = ["repr_" + rule.name for rule in RATIO_RULES]
+    for label, data in (("treino", result_train), ("teste", result_test)):
+        missing = [name for name in expected_columns if name not in data.columns]
+        if missing:
+            raise ValueError(f"Features novas ausentes no {label}: {missing}")
 
     train_out = features_folder / f"{train_file.stem}{suffix}.csv"
     test_out = features_folder / f"{test_file.stem}{suffix}.csv"
@@ -199,7 +219,11 @@ def run_train_test(
     print(f"New representation saved to: {test_out}")
     report["output_file"] = str(train_out)
     report["output_file_test"] = str(test_out)
+    report["shared_official_participants_excluded_from_train"] = removed_ids
+    report["n_train_rows_excluded_due_to_official_overlap"] = removed_rows
     report["n_test_rows"] = int(result_test.shape[0])
+    report["n_train_participants"] = int(df_train["participant_id"].nunique())
+    report["n_test_participants"] = int(df_test["participant_id"].nunique())
     return result_train, report
 
 
@@ -230,8 +254,8 @@ def main() -> None:
     parser.add_argument(
         "--source",
         choices=("fused", "train_test"),
-        default="fused",
-        help="Apply the representation to the fused file or to the train/test splits.",
+        default="train_test",
+        help="Apply the representation to the train/test splits (default) or fused file.",
     )
     parser.add_argument(
         "--suffix",
@@ -251,6 +275,8 @@ def main() -> None:
     args = parser.parse_args()
 
     dataset_config = DatasetConfig(args.json_file)
+    if dataset_config.get_value("DATASET_NAME") != "all_ppgs" or dataset_config.modalities != ["ppg"]:
+        raise ValueError("Esta etapa usa apenas DATASET_NAME=all_ppgs e MODALITIES=ppg.")
     spec = load_spec(
         dataset_config, args.spec, args.repr, not args.no_original
     )

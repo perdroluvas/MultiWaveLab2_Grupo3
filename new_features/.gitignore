@@ -1,0 +1,6 @@
+# Arquivos gerados automaticamente pelo Python / editor
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+Thumbs.db
